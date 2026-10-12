@@ -1,0 +1,18 @@
+# Netlify Build & Deployment Configuration for PlayUp
+[build]
+  publish = "dist"
+  command = "npm run build"
+
+# Proxy all /api/* requests to the live PlayUp backend server
+[[redirects]]
+  from = "/api/*"
+  to = "https://ais-dev-x2ludovvteawsky54uj7vr-266949098099.europe-west2.run.app/api/:splat"
+  status = 200
+  force = true
+
+# SPA fallback for React client-side routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+

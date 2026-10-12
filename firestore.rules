@@ -1,0 +1,220 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Validation Blueprints
+    function isValidUserPublicProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.uid == userId &&
+        data.uid == request.auth.uid &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivateInfo(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'preferredCurrency', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'phone', 'preferredCurrency', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.uid == userId &&
+        data.uid == request.auth.uid &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 32)) &&
+        data.preferredCurrency is string && data.preferredCurrency.size() <= 8 &&
+        data.preferredCurrency in ['USD', 'HTG', 'EUR'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserOrderRecord(data, userId) {
+      return data.keys().hasAll([
+          'orderNumber', 'partnerOrderId', 'ownerId', 'gameName', 'packageName',
+          'amount', 'currency', 'paymentMethod', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'orderNumber', 'partnerOrderId', 'ownerId', 'gameName', 'packageName',
+          'amount', 'currency', 'paymentMethod', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.orderNumber is string && data.orderNumber.size() >= 1 && data.orderNumber.size() <= 64 && data.orderNumber.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.partnerOrderId is string && data.partnerOrderId.size() >= 1 && data.partnerOrderId.size() <= 64 && data.partnerOrderId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId == userId &&
+        data.ownerId == request.auth.uid &&
+        data.gameName is string && data.gameName.size() >= 1 && data.gameName.size() <= 80 &&
+        data.packageName is string && data.packageName.size() >= 1 && data.packageName.size() <= 120 &&
+        data.amount is number && data.amount >= 0 && data.amount <= 100000 &&
+        data.currency is string && data.currency.size() <= 8 && data.currency in ['USD', 'HTG', 'EUR'] &&
+        data.paymentMethod is string && data.paymentMethod.size() <= 24 && data.paymentMethod in ['card', 'moncash', 'natcash', 'wallet'] &&
+        data.status is string && data.status.size() <= 24 &&
+        data.status in ['pending', 'paid', 'processing', 'completed', 'failed', 'cancelled', 'refunded'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidWebhookIdempotencyRecord(data, eventId) {
+      return data.keys().hasAll([
+          'eventId', 'provider', 'eventType', 'status', 'signatureHash', 'processedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'eventId', 'provider', 'eventType', 'providerOrderId', 'playupOrderId',
+          'buyerRef', 'status', 'signatureHash', 'processedAt'
+        ]) &&
+        data.eventId is string && data.eventId.size() >= 1 && data.eventId.size() <= 128 && data.eventId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.eventId == eventId &&
+        data.provider is string && data.provider.size() <= 32 && data.provider in ['rechargegames'] &&
+        data.eventType is string && data.eventType.size() >= 1 && data.eventType.size() <= 64 &&
+        data.eventType in ['webhook.test', 'order.delivered', 'order.refunded', 'order.failed'] &&
+        (!('providerOrderId' in data) || (data.providerOrderId is string && data.providerOrderId.size() <= 64 && data.providerOrderId.matches('^[a-zA-Z0-9_\\-]+$'))) &&
+        (!('playupOrderId' in data) || (data.playupOrderId is string && data.playupOrderId.size() <= 64 && data.playupOrderId.matches('^[a-zA-Z0-9_\\-]+$'))) &&
+        (!('buyerRef' in data) || (data.buyerRef is string && data.buyerRef.size() <= 64 && data.buyerRef.matches('^[a-zA-Z0-9_\\-]+$'))) &&
+        data.status is string && data.status.size() <= 24 && data.status in ['processed'] &&
+        data.signatureHash is string && data.signatureHash.size() >= 8 && data.signatureHash.size() <= 128 && data.signatureHash.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.processedAt is timestamp;
+    }
+
+    // Admins lookup collection (read-only for owner/admin, system-managed)
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && request.auth.uid == adminId;
+      allow list, create, update, delete: if false;
+    }
+
+    // Immutable Webhook Idempotency Registry (/webhook_events/{eventId})
+    match /webhook_events/{eventId} {
+      allow get: if isSignedIn() && isValidId(eventId) && isAdmin();
+      allow list: if isSignedIn() && resource.data.provider == 'rechargegames' && isAdmin();
+
+      allow create: if isAdmin() &&
+        isValidId(eventId) &&
+        isValidWebhookIdempotencyRecord(incoming(), eventId) &&
+        incoming().processedAt == request.time;
+
+      allow update, delete: if false;
+    }
+
+    // Public User Profile
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+
+      allow create: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUserPublicProfile(incoming(), userId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn() &&
+        isValidId(userId) &&
+        isValidUserPublicProfile(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']))
+        );
+
+      allow delete: if isAdmin() && isValidId(userId);
+
+      // Isolated PII Subcollection
+      match /private/{docId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(docId) && (isOwner(userId) || isAdmin()) &&
+          exists(/databases/$(database)/documents/users/$(userId));
+        allow list: if false;
+
+        allow create: if isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(docId) &&
+          isValidUserPrivateInfo(incoming(), userId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/users/$(userId));
+
+        allow update: if isSignedIn() &&
+          isValidId(userId) &&
+          isValidId(docId) &&
+          isValidUserPrivateInfo(incoming(), userId) &&
+          incoming().uid == existing().uid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/users/$(userId)) && (
+            isAdmin() ||
+            (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['phone', 'preferredCurrency', 'updatedAt']))
+          );
+
+        allow delete: if isAdmin() && isValidId(userId) && isValidId(docId);
+      }
+
+      // User Orders Subcollection
+      match /orders/{orderId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(orderId) && (isOwner(userId) || isAdmin()) &&
+          exists(/databases/$(database)/documents/users/$(userId));
+        allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+
+        allow create: if isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(orderId) &&
+          isValidUserOrderRecord(incoming(), userId) &&
+          incoming().status in ['pending', 'paid'] &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/users/$(userId));
+
+        allow update: if isSignedIn() &&
+          isValidId(userId) &&
+          isValidId(orderId) &&
+          isValidUserOrderRecord(incoming(), userId) &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().orderNumber == existing().orderNumber &&
+          incoming().partnerOrderId == existing().partnerOrderId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/users/$(userId)) && (
+            isAdmin() ||
+            (
+              isOwner(userId) &&
+              !(existing().status in ['completed', 'failed', 'cancelled', 'refunded']) &&
+              incoming().status == 'cancelled' &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+            )
+          );
+
+        allow delete: if false;
+      }
+    }
+  }
+}
